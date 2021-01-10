@@ -1067,7 +1067,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = User.objects.only(
-            'id', 'username', 'email', 'scan_directory', 'first_name',
+            'id', 'username', 'email', 'scan_directory', 'confidence', 'first_name',
             'last_name', 'date_joined', 'avatar', 'nextcloud_server_address',
             'nextcloud_username', 'nextcloud_scan_directory'
         ).order_by('-last_login')
@@ -1414,12 +1414,11 @@ class RootPathTreeView(APIView):
             res = [path_to_dict(p) for p in config.image_dirs]
             return Response(res)
         except Exception as e:
-            logger.error(str(e))
+            logger.exception(str(e))
             return Response({'message':str(e)})
 
 
 class SearchTermExamples(APIView):
-    # @cache_response(CACHE_TTL_VIZ)
     def get(self, request, format=None):
         search_term_examples = get_search_term_examples(request.user)
         return Response({"results": search_term_examples})

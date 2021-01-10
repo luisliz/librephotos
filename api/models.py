@@ -1,5 +1,4 @@
 from datetime import datetime
-import dateutil.parser as dateparser
 import PIL
 from PIL import ImageOps
 from django.db import models
@@ -14,6 +13,8 @@ import base64
 import numpy as np
 import os
 import pytz
+import pyheif
+import magic
 
 from api.exifreader import rotate_image
 
@@ -30,9 +31,6 @@ from django.contrib.postgres.fields import JSONField
 
 from api.places365.places365 import inference_places365
 from api.im2txt.sample import im2txt
-
-import requests
-import base64
 
 from django_cryptography.fields import encrypt
 from api.im2vec import Im2Vec
@@ -89,6 +87,7 @@ def get_default_longrunningjob_result():
 
 class User(AbstractUser):
     scan_directory = models.CharField(max_length=512, db_index=True)
+    confidence = models.FloatField(default=0.1, db_index=True)
     avatar = models.ImageField(upload_to='avatars', null=True)
 
     nextcloud_server_address = models.CharField(
@@ -109,17 +108,11 @@ class Photo(models.Model):
     # md5_{user.id}
     image_hash = models.CharField(primary_key=True, max_length=64, null=False)
 
-    thumbnail = models.ImageField(upload_to='thumbnails')
-    thumbnail_tiny = models.ImageField(upload_to='thumbnails_tiny')
-    thumbnail_small = models.ImageField(upload_to='thumbnails_small')
-    thumbnail_big = models.ImageField(upload_to='thumbnails_big')
+    thumbnail_big = models.ImageField(upload_to='thumbnails')
 
     square_thumbnail = models.ImageField(upload_to='square_thumbnails')
-    square_thumbnail_tiny = models.ImageField(
-        upload_to='square_thumbnails_tiny')
     square_thumbnail_small = models.ImageField(
         upload_to='square_thumbnails_small')
-    square_thumbnail_big = models.ImageField(upload_to='square_thumbnails_big')
 
     image = models.ImageField(upload_to='photos')
 
@@ -160,7 +153,7 @@ class Photo(models.Model):
         self.save()
 
     def _generate_captions_im2txt(self):
-        image_path = self.thumbnail.path
+        image_path = self.thumbnail_big.path
         captions = self.captions_json
         search_captions = self.search_captions
         try:
@@ -182,57 +175,22 @@ class Photo(models.Model):
             return False
 
     def _generate_captions(self):
-        image_path = self.thumbnail.path
+        image_path = self.thumbnail_big.path
         captions = {}
-
-        # im2txt disabled for now
-        if False:
-            try:
-                caption = im2txt(image_path)
-                caption = caption.replace("<start>", '').replace(
-                    "<end>", '').strip().lower()
-                captions['im2txt'] = caption
-                self.captions_json = captions
-                self.search_captions = caption
-                self.save()
-                util.logger.info(
-                    'generated im2txt captions for image %s. caption: %s' %
-                    (image_path, caption))
-            except:
-                util.logger.warning(
-                    'could not generate im2txt captions for image %s' %
-                    image_path)
-
-        # densecap disabled for now
-        if False:
-            try:
-                with open(image_path, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read())
-                encoded_string = str(encoded_string)[2:-1]
-                resp_captions = requests.post(
-                    'http://localhost:5000/', data=encoded_string)
-                captions['densecap'] = resp_captions.json()['data'][:10]
-                self.search_captions = ' , '.join(
-                    resp_captions.json()['data'][:10])
-                self.save()
-            except:
-                util.logger.warning(
-                    'could not generate densecap captions for image %s' %
-                    image_path)
 
         # places365
         try:
-            res_places365 = inference_places365(image_path)
+            confidence = self.owner.confidence
+            res_places365 = inference_places365(image_path, confidence)
             captions['places365'] = res_places365
             self.captions_json = captions
             if self.search_captions:
                 self.search_captions = self.search_captions + ' , ' + \
                     ' , '.join(
-                        res_places365['attributes'] + res_places365['categories'] + [res_places365['environment']])
+                        res_places365['categories'] + [res_places365['environment']])
             else:
                 self.search_captions = ' , '.join(
-                    res_places365['attributes'] + res_places365['categories'] +
-                    [res_places365['environment']])
+                    res_places365['categories'] + [res_places365['environment']])
 
             self.save()
             util.logger.info(
@@ -242,90 +200,78 @@ class Photo(models.Model):
                 'could not generate places365 captions for image %s' %
                 image_path)
 
-    def _generate_thumbnail(self):
-        image = PIL.Image.open(self.image_path)
-
+    def isHeic(self):
+        try:
+            filetype = magic.from_buffer(open(self.image_path,"rb").read(2048), mime=True)
+            return 'heic' in filetype or 'heif' in filetype
+        except:
+            util.logger.exception("An image throwed an exception")
+            return False
+    
+    def get_pil_image(self):
+        if self.isHeic():
+            heif_file = pyheif.read(self.image_path)
+            image = PIL.Image.frombytes(
+                heif_file.mode, 
+                heif_file.size, 
+                heif_file.data,
+                "raw",
+                heif_file.mode,
+                heif_file.stride,
+                )
+        else:
+            image = PIL.Image.open(self.image_path)
         image = rotate_image(image)
-
-        # make thumbnails
-        image.thumbnail(ownphotos.settings.THUMBNAIL_SIZE_BIG,
-                        PIL.Image.ANTIALIAS)
-        image_io_thumb = BytesIO()
         if image.mode != 'RGB':
-            image = image.convert('RGB')
-        image.save(image_io_thumb, format="JPEG")
-        self.thumbnail_big.save(self.image_hash + '.jpg',
-                                ContentFile(image_io_thumb.getvalue()))
-        image_io_thumb.close()
+                image = image.convert('RGB')
+        return image
 
-        square_thumb = ImageOps.fit(
-            image, ownphotos.settings.THUMBNAIL_SIZE_BIG, PIL.Image.ANTIALIAS)
-        image_io_square_thumb = BytesIO()
-        square_thumb.save(image_io_square_thumb, format="JPEG")
-        self.square_thumbnail_big.save(
-            self.image_hash + '.jpg',
-            ContentFile(image_io_square_thumb.getvalue()))
-        image_io_square_thumb.close()
+    def _generate_thumbnail(self):
+        image = self.get_pil_image()
+        if not os.path.exists(os.path.join(ownphotos.settings.MEDIA_ROOT,'thumbnails_big', self.image_hash + '.jpg').strip()):
+            image.thumbnail(ownphotos.settings.THUMBNAIL_SIZE_BIG,
+                            PIL.Image.ANTIALIAS)
+            image_io_thumb = BytesIO()
+            image.save(image_io_thumb, format="JPEG")
+            self.thumbnail_big.save(
+                self.image_hash + '.jpg',
+                ContentFile(image_io_thumb.getvalue()))
+            image_io_thumb.close()
+        #thumbnail already exists, add to photo
+        else:
+            self.thumbnail_big.name=os.path.join(ownphotos.settings.MEDIA_ROOT,'thumbnails_big', self.image_hash + '.jpg').strip()
 
-        image.thumbnail(ownphotos.settings.THUMBNAIL_SIZE_MEDIUM,
-                        PIL.Image.ANTIALIAS)
-        image_io_thumb = BytesIO()
-        image.save(image_io_thumb, format="JPEG")
-        self.thumbnail.save(self.image_hash + '.jpg',
-                            ContentFile(image_io_thumb.getvalue()))
-        image_io_thumb.close()
-
-        square_thumb = ImageOps.fit(image,
-                                    ownphotos.settings.THUMBNAIL_SIZE_MEDIUM,
+        if not os.path.exists(os.path.join(ownphotos.settings.MEDIA_ROOT,'square_thumbnails', self.image_hash + '.jpg').strip()):
+            square_thumb = ImageOps.fit(image,
+                                        ownphotos.settings.THUMBNAIL_SIZE_MEDIUM,
                                     PIL.Image.ANTIALIAS)
-        image_io_square_thumb = BytesIO()
-        square_thumb.save(image_io_square_thumb, format="JPEG")
-        self.square_thumbnail.save(
-            self.image_hash + '.jpg',
-            ContentFile(image_io_square_thumb.getvalue()))
-        image_io_square_thumb.close()
+            image_io_square_thumb = BytesIO()
+            square_thumb.save(image_io_square_thumb, format="JPEG")
+            self.square_thumbnail.save(
+                self.image_hash + '.jpg',
+                ContentFile(image_io_square_thumb.getvalue()))
+            image_io_square_thumb.close()
+        #thumbnail already exists, add to photo
+        else:
+            self.square_thumbnail.name=os.path.join(ownphotos.settings.MEDIA_ROOT,'square_thumbnails', self.image_hash + '.jpg').strip()
 
-        image.thumbnail(ownphotos.settings.THUMBNAIL_SIZE_SMALL,
-                        PIL.Image.ANTIALIAS)
-        image_io_thumb = BytesIO()
-        image.save(image_io_thumb, format="JPEG")
-        self.thumbnail_small.save(self.image_hash + '.jpg',
-                                  ContentFile(image_io_thumb.getvalue()))
-        image_io_thumb.close()
-
-        square_thumb = ImageOps.fit(image,
+        if not os.path.exists(os.path.join(ownphotos.settings.MEDIA_ROOT,'square_thumbnails_small', self.image_hash + '.jpg').strip()):
+            square_thumb = ImageOps.fit(image,
                                     ownphotos.settings.THUMBNAIL_SIZE_SMALL,
                                     PIL.Image.ANTIALIAS)
-        image_io_square_thumb = BytesIO()
-        square_thumb.save(image_io_square_thumb, format="JPEG")
-        self.square_thumbnail_small.save(
-            self.image_hash + '.jpg',
-            ContentFile(image_io_square_thumb.getvalue()))
-        image_io_square_thumb.close()
-
-        image.thumbnail(ownphotos.settings.THUMBNAIL_SIZE_TINY,
-                        PIL.Image.ANTIALIAS)
-        image_io_thumb = BytesIO()
-        image.save(image_io_thumb, format="JPEG")
-        self.thumbnail_tiny.save(self.image_hash + '.jpg',
-                                 ContentFile(image_io_thumb.getvalue()))
-        image_io_thumb.close()
-
-        square_thumb = ImageOps.fit(
-            image, ownphotos.settings.THUMBNAIL_SIZE_TINY, PIL.Image.ANTIALIAS)
-        image_io_square_thumb = BytesIO()
-        square_thumb.save(image_io_square_thumb, format="JPEG")
-        self.square_thumbnail_tiny.save(
-            self.image_hash + '.jpg',
-            ContentFile(image_io_square_thumb.getvalue()))
-        image_io_square_thumb.close()
+            image_io_square_thumb = BytesIO()
+            square_thumb.save(image_io_square_thumb, format="JPEG")
+            self.square_thumbnail_small.save(
+                self.image_hash + '.jpg',
+                ContentFile(image_io_square_thumb.getvalue()))
+            image_io_square_thumb.close()
+        #thumbnail already exists, add to photo
+        else:
+            self.square_thumbnail_small.name=os.path.join(ownphotos.settings.MEDIA_ROOT,'square_thumbnails_small', self.image_hash + '.jpg').strip()
+        self.save()
 
     def _save_image_to_db(self):
-        image = PIL.Image.open(self.image_path)
-
-        image = rotate_image(image)
-
-        # image.thumbnail(ownphotos.settings.FULLPHOTO_SIZE, PIL.Image.ANTIALIAS)
+        image = self.get_pil_image()
         image_io = BytesIO()
         image.save(image_io, format="JPEG")
         self.image.save(self.image_hash + '.jpg',
@@ -441,7 +387,7 @@ class Photo(models.Model):
 
     def _im2vec(self):
         try:
-            image = PIL.Image.open(self.square_thumbnail_big)
+            image = PIL.Image.open(self.square_thumbnail)
             vec = im2vec.get_vec(image)
             self.encoding = vec.tobytes().hex()
             self.save()
@@ -455,9 +401,7 @@ class Photo(models.Model):
             unknown_person.save()
         else:
             unknown_person = qs_unknown_person[0]
-        image = PIL.Image.open(self.image_path)
-        image = rotate_image(image)
-        image = np.array(image.convert('RGB'))
+        image = np.array(self.get_pil_image())
 
         face_locations = face_recognition.face_locations(image)
         face_encodings = face_recognition.face_encodings(
@@ -500,7 +444,7 @@ class Photo(models.Model):
                 album_thing = get_album_thing(
                     title=attribute, owner=self.owner)
                 if album_thing.photos.filter(
-                        image_hash=self.image_hash).count() == 0:
+                       image_hash=self.image_hash).count() == 0:
                     album_thing.photos.add(self)
                     album_thing.thing_type = 'places365_attribute'
                     album_thing.save()

@@ -32,10 +32,10 @@ RUN --mount=type=cache,target=/var/cache/apt \
     git clone https://github.com/davisking/dlib.git && \
     mkdir /dlib/build && \
     cd /dlib/build && \
-    cmake .. -DDLIB_USE_CUDA=0 -DUSE_AVX_INSTRUCTIONS=0 && \
+    cmake .. -DDLIB_USE_CUDA=0 -DUSE_AVX_INSTRUCTIONS=0 -DUSE_SSE4_INSTRUCTIONS=0 && \
     cmake --build . && \
     cd /dlib && \
-    /miniconda/bin/python setup.py install --no USE_AVX_INSTRUCTIONS && \
+    /miniconda/bin/python setup.py install --no USE_AVX_INSTRUCTIONS --no USE_SSE4_INSTRUCTIONS && \
     rm -rf /var/lib/apt/lists/*
 
 RUN /miniconda/bin/conda install -y pytorch torchvision torchaudio cpuonly -c pytorch
@@ -52,14 +52,17 @@ RUN /miniconda/bin/pip install -r requirements.txt
 RUN /miniconda/bin/python -m spacy download en_core_web_sm
 
 WORKDIR /code/api/places365
-RUN wget --no-check-certificate https://s3.eu-central-1.amazonaws.com/ownphotos-deploy/places365_model.tar.gz
+RUN wget https://s3.eu-central-1.amazonaws.com/ownphotos-deploy/places365_model.tar.gz
 RUN tar xf places365_model.tar.gz
 
 WORKDIR /code/api/im2txt
-RUN wget --no-check-certificate https://s3.eu-central-1.amazonaws.com/ownphotos-deploy/im2txt_model.tar.gz
+RUN wget https://s3.eu-central-1.amazonaws.com/ownphotos-deploy/im2txt_model.tar.gz
 RUN tar xf im2txt_model.tar.gz
 RUN wget https://s3.eu-central-1.amazonaws.com/ownphotos-deploy/im2txt_data.tar.gz
 RUN tar xf im2txt_data.tar.gz
+
+WORKDIR /root/.cache/torch/hub/checkpoints/
+RUN wget https://download.pytorch.org/models/resnet152-b121ed2d.pth
 
 VOLUME /data
 

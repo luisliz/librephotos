@@ -1,21 +1,26 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=LibrePhotos_ownphotos&metric=alert_status)](https://sonarcloud.io/dashboard?id=LibrePhotos_ownphotos) ![Discord](https://img.shields.io/discord/784619049208250388?style=plastic) ![Website](https://img.shields.io/website?down_color=lightgrey&down_message=offline&style=plastic&up_color=blue&up_message=online&url=https%3A%2F%2Flibrephotos.com) ![GitHub contributors](https://img.shields.io/github/contributors/librephotos/librephotos?style=plastic)
 
-<div style="text-align:center"><img width="100" src ="/screenshots/logo.png"/></div>
-
 # LibrePhotos
 
+![](https://github.com/sysoppl/librephotos/blob/update-screenshots/screenshots/mockups_main_fhd.png?raw=true)
+<sub>Mockup designed by rawpixel.com / Freepik</sub>
 ## Screenshots
 
-![](https://github.com/LibrePhotos/librephotos/blob/dev/screenshots/Screenshot_2018-11-27_14-56-21.png?raw=true)
-![](https://github.com/LibrePhotos/librephotos/blob/dev/screenshots/Screenshot_2018-11-27_14-57-50.png?raw=true)
-![](https://github.com/LibrePhotos/librephotos/blob/dev/screenshots/Screenshot_2018-11-27_15-01-49.png?raw=true)
+![](https://github.com/sysoppl/librephotos/blob/update-screenshots/screenshots/photo_manage.png?raw=true)
+![](https://github.com/sysoppl/librephotos/blob/update-screenshots/screenshots/photo_info_fhd.png?raw=true)
+![](https://github.com/sysoppl/librephotos/blob/update-screenshots/screenshots/more_to_discover.png?raw=true)
 
 ## Live demo
-Live [demo avilable here](https://demo2.librephotos.com/).
+Live [demo available here](https://demo2.librephotos.com/).
 User is demo, password is demo1234.
 
-## Discord Server
-https://discord.gg/xwRvtSDGWb
+## Communication
+You can join us via [IRC](https://webchat.freenode.net/) or [Discord](https://discord.gg/xwRvtSDGWb). There is a bridge between the IRC and Discord:
+| Discord            | Freenode IRC          |
+|--------------------|-----------------------|
+| #chit-chat         | #Libre-Photos         |
+| #community-support | #Libre-Photos-Support |
+| #dev               | #Libre-Photos-dev     |
 
 ## What is it?
 
@@ -86,18 +91,21 @@ The easiest way to do it is using Docker.
 ## Docker-compose method (Recommended)
 
 ```
-wget https://raw.githubusercontent.com/LibrePhotos/librephotos/dev/docker-compose.yml.template
-cp docker-compose.yml.template docker-compose.yml
+wget https://raw.githubusercontent.com/LibrePhotos/librephotos/dev/docker-compose.yml
+wget https://raw.githubusercontent.com/LibrePhotos/librephotos/dev/librephotos.env
+cp librephotos.env .env
+
+Do not forget to create the directory's you specified in the ``.env`` file if they do not exist. 
 ```
 
-Open `docker-compose.yml` in your favorite text editor and make changes in the lines with `# CHANGE ME`
+Open `.env` in your favorite text editor and make the required changes.
 
 ```
 docker-compose up -d
 ```
 
-You should have librephotos accessible after a few minutes of bootup on: [localhost:3000](http://localhost:3000)
-User is demo, password is demo1234 unless you chaged it in the docker-compose.yml. It is recomended you change the admin username and password if Libre Photos is going to be publicly accessible via the ``docker-compose.yml`` file.
+You should have librephotos accessible after a few minutes of bootup on: [localhost:3000](http://localhost:3000) unless you changed it in the .env file.
+User is admin, password is admin unless you changed it in the .env file. It is recommended you change the admin username and password if Libre Photos is going to be publicly accessible via the ``.env`` file.
 
 ## First steps after setting up
 
@@ -105,7 +113,7 @@ You need to log in as the admin user, and set up the directory for the users. To
 
 The basic idea is this:
 
-- For scaning photos that reside in the local file system
+- For scanning photos that reside in the local file system
   - Only the admin user can change the "scan directory" of the users, including the admin itself.
   - Normal users cannot change his/her own "scan directory"
   - Only the admin can find the page to control this under the "user icon (top right) - admin area"

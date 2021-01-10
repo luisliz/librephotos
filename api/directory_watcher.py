@@ -1,4 +1,5 @@
 import os
+import stat
 import datetime
 import hashlib
 import pytz
@@ -15,7 +16,7 @@ from PIL import Image
 def isValidMedia(filebuffer):
     try:
         filetype = magic.from_buffer(filebuffer, mime=True)
-        return 'jpeg' in filetype or 'png' in filetype or 'bmp' in filetype or 'gif' in filetype
+        return 'jpeg' in filetype or 'png' in filetype or 'bmp' in filetype or 'gif' in filetype or 'heic' in filetype or 'heif' in filetype
     except:
         util.logger.exception("An image throwed an exception")
         return False
@@ -26,10 +27,21 @@ def calculate_hash(user,image_path):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest() + str(user.id)
+import os
 
-def handle_new_image(user, image_path, job_id):
-    if isValidMedia(open(image_path,"rb").read(2048)):
-        try:
+def is_hidden(filepath):
+    name = os.path.basename(os.path.abspath(filepath))
+    return name.startswith('.') or has_hidden_attribute(filepath)
+
+def has_hidden_attribute(filepath):
+    try:
+        return bool(os.stat(filepath).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN)
+    except:
+        return False
+
+def handle_new_image(user, image_path, job_id):   
+    try:
+        if isValidMedia(open(image_path,"rb").read(2048)):
             elapsed_times = {
                 'md5':None,
                 'thumbnails':None,
@@ -85,18 +97,19 @@ def handle_new_image(user, image_path, job_id):
             else:
                 util.logger.warning("job {}: file {} exists already".format(job_id,image_path))
 
-        except Exception as e:
-            try:
-                util.logger.exception("job {}: could not load image {}. reason: {}".format(
-                    job_id,image_path, str(e)))
-            except:
-                util.logger.exception("job {}: could not load image {}".format(job_id,image_path))
+    except Exception as e:
+        try:
+            util.logger.exception("job {}: could not load image {}. reason: {}".format(
+                job_id,image_path, str(e)))
+        except:
+            util.logger.exception("job {}: could not load image {}".format(job_id,image_path))
 
 def rescan_image(user, image_path, job_id):
-    if isValidMedia(open(image_path,"rb").read(2048)):
         try:
-            photo = Photo.objects.filter(Q(image_path=image_path)).get()
-            photo._extract_date_time_from_exif()
+            if isValidMedia(open(image_path,"rb").read(2048)):
+                photo = Photo.objects.filter(Q(image_path=image_path)).get()
+                photo._generate_thumbnail()
+                photo._extract_date_time_from_exif()
 
         except Exception as e:
             try:
@@ -126,10 +139,11 @@ def scan_photos(user, job_id):
     try:
         image_paths = []
 
-        image_paths.extend([
-            os.path.join(dp, f) for dp, dn, fn in os.walk(user.scan_directory)
-            for f in fn
-        ])
+        for root, dirs, files in os.walk(user.scan_directory, followlinks=True):
+            files = [f for f in files if not is_hidden(os.path.join(root,f))]
+            dirs[:] = [d for d in dirs if not is_hidden(os.path.join(root,d))]
+            for file in files:
+                image_paths.append(os.path.join(root, file))
         image_paths.sort()
 
         # Create a list with all images whose hash is new or they do not exist in the db
